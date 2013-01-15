@@ -95,8 +95,9 @@ DECLARE_DELAYED_WORK(sleep_workqueue, bluesleep_sleep_work);
 #define BT_TXDATA	0x02
 #define BT_ASLEEP	0x04
 
-//Un-comment for root permission
+//Un-comment for root permission - BRCM port
 //#define BTLA_ROOT_PERMISSION
+//Un-comment for root permission - BRCM port
 
 /* global pointer to a single hci device. */
 static struct hci_dev *bluesleep_hdev;
@@ -695,7 +696,9 @@ static struct platform_driver bluesleep_driver = {
 };
 
 #ifndef BTLA_ROOT_PERMISSION
+// jb/system/core/include/private/android_filesystem_config.h
 #define AID_BLUETOOTH	1002
+#define AID_NET_BT_STACK  3008
 #endif
 
 /**
@@ -739,7 +742,7 @@ static int __init bluesleep_init(void)
 	ent->write_proc = bluepower_write_proc_btwake;
 #ifndef BTLA_ROOT_PERMISSION
 	ent->uid = AID_BLUETOOTH;
-	ent->gid = AID_BLUETOOTH;
+	ent->gid = AID_NET_BT_STACK;
 #endif
 
 	/* read only proc entries */
@@ -761,7 +764,7 @@ static int __init bluesleep_init(void)
 	ent->write_proc = bluesleep_write_proc_proto;
 #ifndef BTLA_ROOT_PERMISSION
 	ent->uid = AID_BLUETOOTH;
-	ent->gid = AID_BLUETOOTH;
+	ent->gid = AID_NET_BT_STACK;
 #endif
 
 	/* read only proc entries */
