@@ -50,13 +50,19 @@ static unsigned bt_config_power_off[] = {
 	GPIO_CFG(BT_RESET_N, 0, GPIO_CFG_INPUT, GPIO_CFG_PULL_DOWN, GPIO_CFG_2MA),	/* RESET_N */	
 };
 
+static int previous = -1;
 static int thunderg_bluetooth_toggle_radio(void *data, bool state)
 {
-	int ret;
+	int ret = 0;
 	int (*power_control)(int enable);
+	int onoff = (state == RFKILL_USER_STATE_SOFT_BLOCKED) ? 1 : 0;
 
-    power_control = ((struct bluetooth_platform_data *)data)->bluetooth_power;
-	ret = (*power_control)((state == RFKILL_USER_STATE_SOFT_BLOCKED) ? 1 : 0);
+	if (previous != onoff) {
+            power_control = ((struct bluetooth_platform_data *)data)->bluetooth_power;
+	    ret = (*power_control)(onoff);
+            previous = onoff;
+	}
+
 	return ret;
 }
 
