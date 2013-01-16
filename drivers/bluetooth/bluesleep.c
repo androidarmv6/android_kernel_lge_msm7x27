@@ -742,7 +742,7 @@ static int __init bluesleep_init(void)
 	ent->write_proc = bluepower_write_proc_btwake;
 #ifndef BTLA_ROOT_PERMISSION
 	ent->uid = AID_BLUETOOTH;
-	ent->gid = AID_NET_BT_STACK;
+	ent->gid = AID_BLUETOOTH;
 #endif
 
 	/* read only proc entries */
@@ -764,7 +764,7 @@ static int __init bluesleep_init(void)
 	ent->write_proc = bluesleep_write_proc_proto;
 #ifndef BTLA_ROOT_PERMISSION
 	ent->uid = AID_BLUETOOTH;
-	ent->gid = AID_NET_BT_STACK;
+	ent->gid = AID_BLUETOOTH;
 #endif
 
 	/* read only proc entries */
