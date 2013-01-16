@@ -50,13 +50,19 @@ static unsigned bt_config_power_off[] = {
 	GPIO_CFG(BT_RESET_N, 0, GPIO_CFG_INPUT, GPIO_CFG_PULL_DOWN, GPIO_CFG_2MA),	/* RESET_N */	
 };
 
-static int thunderg_bluetooth_toggle_radio(void *data, bool state)
+static int previous = -1;
+static int thunderg_bluetooth_toggle_radio(void *data, bool blocked)
 {
-	int ret;
+	int ret = 0;
 	int (*power_control)(int enable);
-
     power_control = ((struct bluetooth_platform_data *)data)->bluetooth_power;
-	ret = (*power_control)((state == RFKILL_USER_STATE_SOFT_BLOCKED) ? 1 : 0);
+
+	if (previous != blocked)
+		ret = (*power_control)(!blocked);
+
+	if (!ret)
+		previous = blocked;
+
 	return ret;
 }
 
@@ -124,9 +130,9 @@ static struct platform_device msm_bt_power_device = {
 static void __init bt_power_init(void)
 {
 /* LGE_CHANGE_S, [kidong0420.kim@lge.com] , 2010-06-18, for current consumption*/
-  gpio_set_value(23, 1);
+  gpio_set_value(CONFIG_BCM4325_GPIO_WL_REGON, 1);
   ssleep(1); /* 1 sec */
-  gpio_set_value(23, 0);
+  gpio_set_value(CONFIG_BCM4325_GPIO_WL_REGON, 0);
 /* LGE_CHANGE_E, [kidong0420.kim@lge.com] , 2010-06-18, for current consumption*/
 }
 #else

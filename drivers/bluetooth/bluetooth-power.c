@@ -75,7 +75,7 @@ static int bluetooth_power_rfkill_probe(struct platform_device *pdev)
 	/* force Bluetooth off during init to allow for user control */
 	rfkill_init_sw_state(rfkill, 1);
 
-#if !defined (CONFIG_MACH_LGE)	
+#if !defined (CONFIG_MACH_LGE)
 	previous = 1;
 #endif
 	ret = rfkill_register(rfkill);
