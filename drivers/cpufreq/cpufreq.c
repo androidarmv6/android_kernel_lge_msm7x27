@@ -41,11 +41,7 @@ static struct cpufreq_driver *cpufreq_driver;
 static DEFINE_PER_CPU(struct cpufreq_policy *, cpufreq_cpu_data);
 #ifdef CONFIG_HOTPLUG_CPU
 /* This one keeps track of the previously set governor of a removed CPU */
-struct cpufreq_cpu_save_data {
-	char gov[CPUFREQ_NAME_LEN];
-	unsigned int max, min;
-};
-static DEFINE_PER_CPU(struct cpufreq_cpu_save_data, cpufreq_policy_save);
+static DEFINE_PER_CPU(char[CPUFREQ_NAME_LEN], cpufreq_cpu_governor);
 #endif
 static DEFINE_SPINLOCK(cpufreq_driver_lock);
 
@@ -412,14 +408,21 @@ static int cpufreq_parse_governor(char *str_governor, unsigned int *policy,
 		t = __find_governor(str_governor);
 
 		if (t == NULL) {
-			int ret;
+			char *name = kasprintf(GFP_KERNEL, "cpufreq_%s",
+								str_governor);
 
-			mutex_unlock(&cpufreq_governor_mutex);
-			ret = request_module("cpufreq_%s", str_governor);
-			mutex_lock(&cpufreq_governor_mutex);
+			if (name) {
+				int ret;
 
-			if (ret == 0)
-				t = __find_governor(str_governor);
+				mutex_unlock(&cpufreq_governor_mutex);
+				ret = request_module("%s", name);
+				mutex_lock(&cpufreq_governor_mutex);
+
+				if (ret == 0)
+					t = __find_governor(str_governor);
+			}
+
+			kfree(name);
 		}
 
 		if (t != NULL) {
@@ -779,22 +782,12 @@ static int cpufreq_add_dev_policy(unsigned int cpu,
 #ifdef CONFIG_HOTPLUG_CPU
 	struct cpufreq_governor *gov;
 
-	gov = __find_governor(per_cpu(cpufreq_policy_save, cpu).gov);
+	gov = __find_governor(per_cpu(cpufreq_cpu_governor, cpu));
 	if (gov) {
 		policy->governor = gov;
 		dprintk("Restoring governor %s for cpu %d\n",
 		       policy->governor->name, cpu);
 	}
-	if (per_cpu(cpufreq_policy_save, cpu).min) {
-		policy->min = per_cpu(cpufreq_policy_save, cpu).min;
-		policy->user_policy.min = policy->min;
-	}
-	if (per_cpu(cpufreq_policy_save, cpu).max) {
-		policy->max = per_cpu(cpufreq_policy_save, cpu).max;
-		policy->user_policy.max = policy->max;
-	}
-	dprintk("Restoring CPU%d min %d and max %d\n",
-		cpu, policy->min, policy->max);
 #endif
 
 	for_each_cpu(j, policy->cpus) {
@@ -924,8 +917,8 @@ static int cpufreq_add_dev_interface(unsigned int cpu,
 
 	spin_lock_irqsave(&cpufreq_driver_lock, flags);
 	for_each_cpu(j, policy->cpus) {
-		if (!cpu_online(j))
-			continue;
+	if (!cpu_online(j))
+		continue;
 		per_cpu(cpufreq_cpu_data, j) = policy;
 		per_cpu(cpufreq_policy_cpu, j) = policy->cpu;
 	}
@@ -1151,12 +1144,8 @@ static int __cpufreq_remove_dev(struct sys_device *sys_dev)
 #ifdef CONFIG_SMP
 
 #ifdef CONFIG_HOTPLUG_CPU
-	strncpy(per_cpu(cpufreq_policy_save, cpu).gov, data->governor->name,
+	strncpy(per_cpu(cpufreq_cpu_governor, cpu), data->governor->name,
 			CPUFREQ_NAME_LEN);
-	per_cpu(cpufreq_policy_save, cpu).min = data->min;
-	per_cpu(cpufreq_policy_save, cpu).max = data->max;
-	dprintk("Saving CPU%d policy min %d and max %d\n",
-			cpu, data->min, data->max);
 #endif
 
 	/* if we have other CPUs still registered, we need to unlink them,
@@ -1180,12 +1169,8 @@ static int __cpufreq_remove_dev(struct sys_device *sys_dev)
 				continue;
 			dprintk("removing link for cpu %u\n", j);
 #ifdef CONFIG_HOTPLUG_CPU
-			strncpy(per_cpu(cpufreq_policy_save, j).gov,
+			strncpy(per_cpu(cpufreq_cpu_governor, j),
 				data->governor->name, CPUFREQ_NAME_LEN);
-			per_cpu(cpufreq_policy_save, j).min = data->min;
-			per_cpu(cpufreq_policy_save, j).max = data->max;
-			dprintk("Saving CPU%d policy min %d and max %d\n",
-					j, data->min, data->max);
 #endif
 			cpu_sys_dev = get_cpu_sysdev(j);
 			kobj = &cpu_sys_dev->kobj;
@@ -1384,7 +1369,7 @@ static int cpufreq_suspend(struct sys_device *sysdev, pm_message_t pmsg)
 		goto out;
 
 	if (cpufreq_driver->suspend) {
-		ret = cpufreq_driver->suspend(cpu_policy);
+		ret = cpufreq_driver->suspend(cpu_policy, pmsg);
 		if (ret)
 			printk(KERN_ERR "cpufreq: suspend failed in ->suspend "
 					"step on CPU %u\n", cpu_policy->cpu);
@@ -1673,11 +1658,8 @@ void cpufreq_unregister_governor(struct cpufreq_governor *governor)
 	for_each_present_cpu(cpu) {
 		if (cpu_online(cpu))
 			continue;
-		if (!strcmp(per_cpu(cpufreq_policy_save, cpu).gov,
-					governor->name))
-			strcpy(per_cpu(cpufreq_policy_save, cpu).gov, "\0");
-		per_cpu(cpufreq_policy_save, cpu).min = 0;
-		per_cpu(cpufreq_policy_save, cpu).max = 0;
+		if (!strcmp(per_cpu(cpufreq_cpu_governor, cpu), governor->name))
+			strcpy(per_cpu(cpufreq_cpu_governor, cpu), "\0");
 	}
 #endif
 
@@ -1936,10 +1918,8 @@ int cpufreq_register_driver(struct cpufreq_driver *driver_data)
 
 	ret = sysdev_driver_register(&cpu_sysdev_class,
 					&cpufreq_sysdev_driver);
-	if (ret)
-		goto err_null_driver;
 
-	if (!(cpufreq_driver->flags & CPUFREQ_STICKY)) {
+	if ((!ret) && !(cpufreq_driver->flags & CPUFREQ_STICKY)) {
 		int i;
 		ret = -ENODEV;
 
@@ -1954,22 +1934,21 @@ int cpufreq_register_driver(struct cpufreq_driver *driver_data)
 		if (ret) {
 			dprintk("no CPU initialized for driver %s\n",
 							driver_data->name);
-			goto err_sysdev_unreg;
+			sysdev_driver_unregister(&cpu_sysdev_class,
+						&cpufreq_sysdev_driver);
+
+			spin_lock_irqsave(&cpufreq_driver_lock, flags);
+			cpufreq_driver = NULL;
+			spin_unlock_irqrestore(&cpufreq_driver_lock, flags);
 		}
 	}
 
-	register_hotcpu_notifier(&cpufreq_cpu_notifier);
-	dprintk("driver %s up and running\n", driver_data->name);
-	cpufreq_debug_enable_ratelimit();
+	if (!ret) {
+		register_hotcpu_notifier(&cpufreq_cpu_notifier);
+		dprintk("driver %s up and running\n", driver_data->name);
+		cpufreq_debug_enable_ratelimit();
+	}
 
-	return 0;
-err_sysdev_unreg:
-	sysdev_driver_unregister(&cpu_sysdev_class,
-			&cpufreq_sysdev_driver);
-err_null_driver:
-	spin_lock_irqsave(&cpufreq_driver_lock, flags);
-	cpufreq_driver = NULL;
-	spin_unlock_irqrestore(&cpufreq_driver_lock, flags);
 	return ret;
 }
 EXPORT_SYMBOL_GPL(cpufreq_register_driver);
